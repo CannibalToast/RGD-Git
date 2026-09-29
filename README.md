@@ -30,7 +30,7 @@ After it, every repo that opts in just works: clone, pull and commit as usual.
 
 - **Standalone (no Node.js needed):** download the executable for your
   platform from the
-  [latest release](https://github.com/CannibalToast/rgd-git/releases/latest)
+  [latest release](https://github.com/CannibalToast/RGD-Git/releases/latest)
   and run it. On Windows, double-click `rgd-git-windows-x64.exe`. It copies
   itself to `%LOCALAPPDATA%\rgd-git` (Linux and macOS: `~/.local/bin`) and
   enables the filter for every repo. The binary is unsigned, so Windows
