@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: rgd-git-linux-x64
+          - os: windows-latest
+            asset: rgd-git-windows-x64.exe
+          - os: macos-latest
+            asset: rgd-git-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26.10.0"
+      - run: node test/rgd-git.test.js
+      - run: node build.js
+      - name: Name the executable
+        shell: bash
+        run: |
+          src=build/rgd-git; [ "$RUNNER_OS" = Windows ] && src=build/rgd-git.exe
+          mv "$src" "build/${{ matrix.asset }}"
+          [ "$RUNNER_OS" = macOS ] && codesign --sign - "build/${{ matrix.asset }}" || true
+      - name: Test the executable
+        run: node test/rgd-git.test.js
+        env:
+          RGD_GIT: build/${{ matrix.asset }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: build/${{ matrix.asset }}
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: build/${{ matrix.asset }}

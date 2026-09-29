@@ -1,0 +1,22 @@
+{
+  "name": "rgd-git",
+  "version": "0.1.0",
+  "description": "Store Relic .rgd game data in git as readable text, with byte-identical binaries on disk",
+  "license": "MIT",
+  "author": "cannibaltoast",
+  "repository": "github:CannibalToast/rgd-git",
+  "bin": {
+    "rgd-git": "rgd-git.js"
+  },
+  "files": [
+    "rgd-git.js",
+    "lib/"
+  ],
+  "scripts": {
+    "test": "node test/rgd-git.test.js",
+    "build": "node build.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
