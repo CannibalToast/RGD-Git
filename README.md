@@ -28,14 +28,27 @@ GitHub, GitHub Desktop, commit views in editors, `git log -p`, `git show`.
 Git never runs code from a repository, so each machine needs this one step.
 After it, every repo that opts in just works: clone, pull and commit as usual.
 
-- **Standalone (no Node.js needed):** download the executable for your
-  platform from the
-  [latest release](https://github.com/CannibalToast/RGD-Git/releases/latest)
-  and run it. On Windows, double-click `rgd-git-windows-x64.exe`. It copies
-  itself to `%LOCALAPPDATA%\rgd-git` (Linux and macOS: `~/.local/bin`) and
-  enables the filter for every repo. The binary is unsigned, so Windows
-  SmartScreen may ask you to confirm.
-- **With Node.js:** clone this repo and run `node rgd-git.js setup --global`.
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/CannibalToast/RGD-Git/main/install.ps1 | iex
+```
+
+Linux and macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/CannibalToast/RGD-Git/main/install.sh | sh
+```
+
+If Node.js is installed, the script fetches the small JavaScript version
+(about 300 KB). Otherwise it downloads the standalone executable from the
+[latest release](https://github.com/CannibalToast/RGD-Git/releases/latest)
+(about 100 MB, bundles its own Node.js). Both register the filter for every
+repo on the machine. Re-run the script to update.
+
+You can also download an executable from the release yourself and
+double-click it. It is unsigned, so Windows SmartScreen may ask you to
+confirm.
 
 To enable a single repo instead of every repo, run `rgd-git setup` inside it.
 Setup is safe to re-run. It also repairs `.rgd` files that were checked out
