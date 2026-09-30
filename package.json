@@ -1,6 +1,6 @@
 {
   "name": "rgd-git",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Store Relic .rgd game data in git as readable text, with byte-identical binaries on disk",
   "license": "MIT",
   "author": "cannibaltoast",
