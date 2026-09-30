@@ -89,4 +89,22 @@ try {
     fs.rmSync(repo, { recursive: true, force: true });
 }
 
+// An uncommitted edit must survive setup: dirty files convert in place, never deleted
+const repo2 = fs.mkdtempSync(path.join(os.tmpdir(), 'rgd-git-edit-'));
+const git2 = (...a) => execFileSync('git', ['-C', repo2, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString();
+const file2 = path.join(repo2, 'unit.rgd');
+try {
+    git2('init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(repo2, '.gitattributes'), '*.rgd -text filter=rgd diff=rgd\n');
+    fs.writeFileSync(file2, text);
+    git2('add', '.');
+    git2('commit', '-qm', 'text on disk, no filter yet');
+    fs.writeFileSync(file2, Buffer.from(text.toString().replace('value: float = 1000.0', 'value: float = 1500.0')));
+    run(['setup'], undefined, repo2);
+    assert.ok(fs.readFileSync(file2).equals(makeRgd(1500, 5)), 'setup keeps uncommitted edits (converted to binary in place)');
+    assert.strictEqual(git2('status', '--porcelain'), ' M unit.rgd\n', 'edited file stays modified until committed');
+} finally {
+    fs.rmSync(repo2, { recursive: true, force: true });
+}
+
 console.log('rgd-git tests passed');

@@ -135,19 +135,62 @@ const COMMANDS = {
             'diff.rgd.textconv': `${cmd} textconv`,
             'diff.rgd.cachetextconv': 'true',
         };
-        const git = (a, input) => execFileSync('git', root ? ['-C', root, ...a] : a, { encoding: 'utf8', input });
+        const git = (a, input) => execFileSync('git', root ? ['-C', root, ...a] : a, { encoding: 'utf8', input, maxBuffer: Infinity });
         for (const [key, value] of Object.entries(config)) git(['config', scope, key, value]);
         console.log(`rgd-git enabled (${scope === '--global' ? 'every repo on this machine' : root})`);
         if (!root) return;
-        const stale = git(['ls-files', '-z', '--', '*.rgd']).split('\0').filter(f => {
-            const abs = path.join(root, f);
-            return f && fs.existsSync(abs) && utf8(fs.readFileSync(abs)).startsWith(TEXT_HEADER);
-        });
-        for (const f of stale) fs.unlinkSync(path.join(root, f));
-        if (stale.length) {
-            git(['checkout', '--pathspec-from-file=-', '--pathspec-file-nul', '--'], stale.join('\0'));
-            console.log(`restored ${stale.length} .rgd file(s) from text to binary`);
+
+        const attrs = path.join(root, '.gitattributes');
+        if (!/^\*\.rgd\b.*filter=rgd/m.test(fs.existsSync(attrs) ? fs.readFileSync(attrs, 'utf8') : '')) {
+            console.error(`warning: add '*.rgd -text filter=rgd diff=rgd' to ${attrs} — the filter stays inactive until you do`);
         }
+
+        // Clean stale checkouts go back through git; files with local edits convert in
+        // place so the edit survives (and keeps showing as modified until committed).
+        const head = abs => {
+            let fd;
+            try { fd = fs.openSync(abs, 'r'); } catch { return Buffer.alloc(0); }
+            try { const b = Buffer.alloc(32); return b.subarray(0, fs.readSync(fd, b, 0, 32, 0)); }
+            finally { fs.closeSync(fd); }
+        };
+        const isTextDump = abs => utf8(head(abs)).startsWith(TEXT_HEADER);
+        const isBinary = abs => isRgdBinary(head(abs));
+        const tracked = git(['ls-files', '-z', '--', '*.rgd']).split('\0').filter(Boolean);
+        // required=false so one file clean rejects fails per-file, not the whole scan
+        const dirty = new Set(git(['-c', 'filter.rgd.required=false', 'diff', '--name-only', '-z', '--', '*.rgd']).split('\0').filter(Boolean));
+        const stale = tracked.filter(f => !dirty.has(f) && isTextDump(path.join(root, f)));
+        const edited = tracked.filter(f => dirty.has(f) && isTextDump(path.join(root, f)));
+        const failed = [];
+        for (const f of stale) {
+            // `git checkout` skips files its stat cache calls unchanged — the file must be
+            // deleted first or smudge never runs. The backup rolls back a failed checkout.
+            const abs = path.join(root, f);
+            let backup;
+            try { backup = fs.readFileSync(abs); }
+            catch (e) { failed.push(`${f}: ${e.message}`); continue; }
+            try {
+                fs.rmSync(abs);
+                git(['--literal-pathspecs', 'checkout', '--', f]);
+            } catch (e) {
+                try { fs.writeFileSync(abs, backup); } catch { /* nothing left to save */ }
+                failed.push(`${f}: checkout failed: ${String(e.message || e).split('\n')[0]}`);
+                continue;
+            }
+            // smudge passes conflicted/unparseable text through without failing —
+            // checkout exits 0 but the file stays text.
+            if (!isBinary(abs)) failed.push(`${f}: still not binary after checkout`);
+        }
+        for (const f of edited) {
+            const abs = path.join(root, f);
+            if (!fs.existsSync(abs)) continue; // deleted locally — leave it gone
+            try { fs.writeFileSync(abs, fromText(utf8(fs.readFileSync(abs)))); }
+            catch (e) { failed.push(`${f}: ${e.message}`); }
+        }
+        if (!stale.length && !edited.length) return;
+        const restored = [...stale, ...edited].filter(f => isBinary(path.join(root, f))).length;
+        console.log(`restored ${restored} .rgd file(s) from text to binary`);
+        if (edited.length) console.log(`${edited.length} file(s) had local edits and stay modified until committed`);
+        for (const f of failed) console.error(`  failed: ${f}`);
     },
 
     // Standalone executable: copy to a stable per-user location, then set up git globally.
