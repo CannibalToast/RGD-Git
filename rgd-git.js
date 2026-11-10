@@ -309,6 +309,11 @@ const COMMANDS = {
             catch (e) { failed.push(`${f}: ${e.message}`); }
         }
         if (total) process.stdout.write(`\r${' '.repeat(60)}\r`);
+        // In-place writes leave stat dirt: file mtime/size differ from the index
+        // entry, and `git update-index --refresh` won't heal it (its content check
+        // disagrees with the filtered diff — the entry reports ' M' forever).
+        // `git add` rehashes to the identical blob so it only refreshes stat data.
+        for (let i = 0; i < stale.length; i += 500) git(['add', '--', ...stale.slice(i, i + 500)]);
         if (!stale.length && !edited.length) return;
         const restored = [...stale, ...edited].filter(f => isBinary(path.join(root, f))).length;
         console.log(`restored ${restored} .rgd file(s) from text to binary`);
@@ -317,11 +322,14 @@ const COMMANDS = {
     },
 
     // End of setup: prove the filter actually works through git — filtered hash must
-    // differ from raw hash on a real tracked file. Printed last so it can't be missed.
+    // differ from raw hash on a real tracked file. Only a binary worktree file can
+    // prove it: on a text dump clean(text)=text so the hashes match either way.
     verify(root) {
         const git = (a, input) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', input, maxBuffer: Infinity }).trim();
-        const f = git(['ls-files', '--', '*.rgd']).split('\n').filter(Boolean)[0];
-        if (!f) { console.log('no tracked .rgd files — nothing to verify'); return true; }
+        const head32 = abs => { const b = Buffer.alloc(32); try { const fd = fs.openSync(abs, 'r'); fs.readSync(fd, b, 0, 32, 0); fs.closeSync(fd); } catch { return Buffer.alloc(0); } return b; };
+        const f = git(['ls-files', '--', '*.rgd']).split('\n').filter(Boolean)
+            .find(f => isRgdBinary(head32(path.join(root, f))));
+        if (!f) { console.log('no binary .rgd on disk to verify against — skipped'); return true; }
         const ok = git(['hash-object', '--path=' + f, f]) !== git(['hash-object', '--stdin'], fs.readFileSync(path.join(root, f)));
         console.log(ok ? 'filter verified working' : `WARNING: filter configured but inactive — run 'rgd-git doctor'`);
         return ok;
