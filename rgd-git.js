@@ -5,7 +5,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const { createDictionary, loadDictionaryText } = require('./lib/dictionary');
 const { parseRgd } = require('./lib/reader');
 const { buildRgd } = require('./lib/writer');
@@ -253,7 +253,7 @@ const COMMANDS = {
             try {
                 fs.appendFileSync(attrs, (fs.existsSync(attrs) && fs.readFileSync(attrs, 'utf8').trim() ? '\n' : '') + ATTR_LINE + '\n');
             } catch (e) {
-                throw new Error(`could not write .gitattributes — check permissions on ${root}\n  fix: add '${ATTR_LINE}' to it yourself`);
+                throw new Error(`could not write .gitattributes — check permissions on ${root}\n  fix: add '${ATTR_LINE}' to it yourself\n  ${e.message}`);
             }
             console.log(`wrote '${ATTR_LINE}' to .gitattributes`);
         }
@@ -287,7 +287,7 @@ const COMMANDS = {
             const abs = path.join(root, f);
             try {
                 fs.writeFileSync(abs, fromText(utf8(fs.readFileSync(abs))));
-            } catch (e) {
+            } catch {
                 // Unparseable text (corrupt dump, old format): git's own checkout is
                 // the authoritative smudge. File must be deleted first or git's stat
                 // cache calls it unchanged and smudge never runs.
@@ -338,7 +338,7 @@ const COMMANDS = {
     // Audit the whole chain: config, .gitattributes, and a live hash-object round-trip
     // through git's own filter machinery. exit 1 if anything needed is missing.
     doctor() {
-        const cfg = k => { try { return execFileSync('git', ['config', '--get', k], { encoding: 'utf8' }).trim(); } catch { return null; } };
+        const cfg = k => { const r = spawnSync('git', ['config', '--get', k], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; };
         const git = (a, input) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', input, maxBuffer: Infinity }).trim();
         const root = gitRoot();
         let bad = 0;

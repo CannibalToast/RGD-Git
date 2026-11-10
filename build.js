@@ -17,4 +17,3 @@ fs.writeFileSync('build/sea-config.json', JSON.stringify({
     assets,
 }, null, 2));
 execFileSync(process.execPath, ['--build-sea', 'build/sea-config.json'], { stdio: 'inherit' });
-console.log(`built build/${exe}`);
