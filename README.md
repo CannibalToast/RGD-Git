@@ -46,7 +46,7 @@ If Node.js is installed, the script fetches the small JavaScript version
 (about 100 MB, bundles its own Node.js). Both register the filter for every
 repo on the machine. Re-run the script to update.
 
-## Updating
+## Updating (0.1.3 & Above)
 
 ```sh
 rgd-git update
