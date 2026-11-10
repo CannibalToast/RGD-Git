@@ -281,23 +281,25 @@ const COMMANDS = {
         const tick = f => process.stdout.write(`\rrestoring .rgd files  ${++n}/${total}  ${f}          `);
         for (const f of stale) {
             tick(f);
-            // `git checkout` skips files its stat cache calls unchanged — the file must be
-            // deleted first or smudge never runs. The backup rolls back a failed checkout.
+            // Fast path: a clean text dump smudges to exactly the blob's binary —
+            // convert in place (~2ms) instead of rm+git checkout (~50ms per file,
+            // which made 12k-file restores a 15-minute operation).
             const abs = path.join(root, f);
-            let backup;
-            try { backup = fs.readFileSync(abs); }
-            catch (e) { failed.push(`${f}: ${e.message}`); continue; }
             try {
-                fs.rmSync(abs);
-                git(['--literal-pathspecs', 'checkout', '--', f]);
+                fs.writeFileSync(abs, fromText(utf8(fs.readFileSync(abs))));
             } catch (e) {
-                try { fs.writeFileSync(abs, backup); } catch { /* nothing left to save */ }
-                failed.push(`${f}: checkout failed: ${String(e.message || e).split('\n')[0]}`);
-                continue;
+                // Unparseable text (corrupt dump, old format): git's own checkout is
+                // the authoritative smudge. File must be deleted first or git's stat
+                // cache calls it unchanged and smudge never runs.
+                try {
+                    const backup = fs.readFileSync(abs);
+                    fs.rmSync(abs);
+                    git(['--literal-pathspecs', 'checkout', '--', f]);
+                    if (!isBinary(abs)) { fs.writeFileSync(abs, backup); failed.push(`${f}: still not binary after checkout`); }
+                } catch (e2) {
+                    failed.push(`${f}: ${String(e2.message || e2).split('\n')[0]}`);
+                }
             }
-            // smudge passes conflicted/unparseable text through without failing —
-            // checkout exits 0 but the file stays text.
-            if (!isBinary(abs)) failed.push(`${f}: still not binary after checkout`);
         }
         for (const f of edited) {
             tick(f);
