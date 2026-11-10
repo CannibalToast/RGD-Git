@@ -8,11 +8,26 @@ $repo = 'https://github.com/CannibalToast/RGD-Git'
 $dir = Join-Path $env:LOCALAPPDATA 'rgd-git'
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'rgd-git needs Git: https://git-scm.com' }
 
+# Get-Download <url> <dest> <label>: heartbeat while the file lands so a quiet
+# 100 MB fetch never looks stalled.
+function Get-Download($url, $dest, $label) {
+    $wc = New-Object System.Net.WebClient
+    $wc.DownloadFileAsync($url, $dest)
+    $chars = '-\|/'; $i = 0
+    while ($wc.IsBusy) {
+        Write-Host "`r$($chars[$i]) $label" -NoNewline
+        $i = ($i + 1) % 4; Start-Sleep -Milliseconds 100
+    }
+    $wc.Dispose()
+    Write-Host "`r$(' ' * 50)`r" -NoNewline
+}
+
 if (Get-Command node -ErrorAction SilentlyContinue) {
     # ponytail: tracks main; pin to a release tag if the text format ever changes.
     $tmp = Join-Path ([IO.Path]::GetTempPath()) "rgd-git-$([guid]::NewGuid())"
     New-Item -ItemType Directory -Force $tmp | Out-Null
-    Invoke-WebRequest "$repo/archive/refs/heads/main.zip" -OutFile "$tmp\src.zip"
+    Get-Download "$repo/archive/refs/heads/main.zip" "$tmp\src.zip" 'downloading rgd-git'
+    Write-Host 'extracting...'
     Expand-Archive "$tmp\src.zip" $tmp
     if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
     Move-Item (Get-ChildItem $tmp -Directory | Select-Object -First 1).FullName $dir
@@ -21,7 +36,8 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
 } else {
     Write-Host 'Node.js not found; downloading the standalone rgd-git executable...'
     New-Item -ItemType Directory -Force $dir | Out-Null
-    Invoke-WebRequest "$repo/releases/latest/download/rgd-git-windows-x64.exe" -OutFile "$dir\rgd-git.exe"
+    Get-Download "$repo/releases/latest/download/rgd-git-windows-x64.exe" "$dir\rgd-git.exe" 'downloading rgd-git (~100 MB)'
     & "$dir\rgd-git.exe" setup --global
 }
 if ($LASTEXITCODE) { throw "rgd-git setup failed ($LASTEXITCODE)" }
+Write-Host 'rgd-git installed — every repo on this machine is set up.'

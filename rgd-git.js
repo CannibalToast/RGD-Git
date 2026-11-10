@@ -261,13 +261,18 @@ const COMMANDS = {
         };
         const isTextDump = abs => utf8(head(abs)).startsWith(TEXT_HEADER);
         const isBinary = abs => isRgdBinary(head(abs));
+        console.log('scanning tracked .rgd files...');
         const tracked = git(['ls-files', '-z', '--', '*.rgd']).split('\0').filter(Boolean);
         // required=false so one file clean rejects fails per-file, not the whole scan
         const dirty = new Set(git(['-c', 'filter.rgd.required=false', 'diff', '--name-only', '-z', '--', '*.rgd']).split('\0').filter(Boolean));
         const stale = tracked.filter(f => !dirty.has(f) && isTextDump(path.join(root, f)));
         const edited = tracked.filter(f => dirty.has(f) && isTextDump(path.join(root, f)));
         const failed = [];
+        const total = stale.length + edited.length;
+        let n = 0;
+        const tick = f => process.stdout.write(`\rrestoring .rgd files  ${++n}/${total}  ${f}          `);
         for (const f of stale) {
+            tick(f);
             // `git checkout` skips files its stat cache calls unchanged — the file must be
             // deleted first or smudge never runs. The backup rolls back a failed checkout.
             const abs = path.join(root, f);
@@ -287,11 +292,13 @@ const COMMANDS = {
             if (!isBinary(abs)) failed.push(`${f}: still not binary after checkout`);
         }
         for (const f of edited) {
+            tick(f);
             const abs = path.join(root, f);
             if (!fs.existsSync(abs)) continue; // deleted locally — leave it gone
             try { fs.writeFileSync(abs, fromText(utf8(fs.readFileSync(abs)))); }
             catch (e) { failed.push(`${f}: ${e.message}`); }
         }
+        if (total) process.stdout.write(`\r${' '.repeat(60)}\r`);
         if (!stale.length && !edited.length) return;
         const restored = [...stale, ...edited].filter(f => isBinary(path.join(root, f))).length;
         console.log(`restored ${restored} .rgd file(s) from text to binary`);
