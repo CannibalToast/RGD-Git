@@ -37,13 +37,14 @@ spin() {
 if command -v node >/dev/null; then
 	# ponytail: tracks main; pin to a release tag if the text format ever changes.
 	dir=${XDG_DATA_HOME:-$HOME/.local/share}/rgd-git
+	[ -d "$dir" ] && echo "updating rgd-git in $dir" || echo "installing rgd-git into $dir"
 	rm -rf "$dir" && mkdir -p "$dir"
-	echo "installing rgd-git into $dir"
 	{ curl -fsSL "$repo/archive/refs/heads/main.tar.gz" | tar -xz -C "$dir" --strip-components=1; } &
 	spin $! 'downloading + extracting'
 	wait $! || die "download or extract failed" "check your network, then re-run"
 	node "$dir/rgd-git.js" setup --global ||
 		die "setup failed" "run: node '$dir/rgd-git.js' doctor — it prints the broken link and the fix"
+	upd="node '$dir/rgd-git.js' update"
 else
 	case "$(uname -s)-$(uname -m)" in
 	Linux-x86_64) asset=rgd-git-linux-x64 ;;
@@ -60,5 +61,6 @@ else
 	chmod +x "$bin"
 	"$bin" setup --global ||
 		die "setup failed" "run: '$bin' doctor — it prints the broken link and the fix"
+	upd="'$bin' update"
 fi
-echo "rgd-git installed — every repo on this machine is set up."
+echo "rgd-git installed — every repo on this machine is set up. Update later: $upd"

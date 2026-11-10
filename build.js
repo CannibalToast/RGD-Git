@@ -7,7 +7,8 @@ const { execFileSync } = require('child_process');
 
 process.chdir(__dirname);
 const exe = process.platform === 'win32' ? 'rgd-git.exe' : 'rgd-git';
-const assets = Object.fromEntries(fs.readdirSync('lib').map(f => [`lib/${f}`, `lib/${f}`]));
+const assets = Object.assign({ 'package.json': 'package.json' },
+    Object.fromEntries(fs.readdirSync('lib').map(f => [`lib/${f}`, `lib/${f}`])));
 fs.mkdirSync('build', { recursive: true });
 fs.writeFileSync('build/sea-config.json', JSON.stringify({
     main: 'rgd-git.js',

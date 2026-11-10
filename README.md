@@ -46,6 +46,23 @@ If Node.js is installed, the script fetches the small JavaScript version
 (about 100 MB, bundles its own Node.js). Both register the filter for every
 repo on the machine. Re-run the script to update.
 
+## Updating
+
+```sh
+rgd-git update
+```
+
+Checks the latest GitHub release and replaces the install in place — the
+standalone executable swaps itself, a Node.js install re-fetches the source
+into its own directory. It compares versions first and skips the download
+entirely when you're already current; `--force` overrides that. New files only
+land after a verified download, so a failed update never breaks the working
+install. `rgd-git version` prints what you have.
+
+If rgd-git runs from a repo checkout instead of an install, `update` just tells
+you to `git pull`. Installations from before v0.1.3 don't have this command —
+re-run the install script once to get it.
+
 You can also download an executable from the release yourself and
 double-click it. It is unsigned, so Windows SmartScreen may ask you to
 confirm.

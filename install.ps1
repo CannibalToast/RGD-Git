@@ -41,14 +41,16 @@ try {
         Remove-Item $tmp -Recurse -Force
         & node "$dir\rgd-git.js" setup --global
         if ($LASTEXITCODE) { Stop-Install "setup failed (exit $LASTEXITCODE)" "run: node `"$dir\rgd-git.js`" doctor — it prints the broken link and the fix" }
+        $upd = "node `"$dir\rgd-git.js`" update"
     } else {
         Write-Host 'Node.js not found; downloading the standalone rgd-git executable...'
         New-Item -ItemType Directory -Force $dir | Out-Null
         Get-Download "$repo/releases/latest/download/rgd-git-windows-x64.exe" "$dir\rgd-git.exe" 'downloading rgd-git (~100 MB)'
         & "$dir\rgd-git.exe" setup --global
         if ($LASTEXITCODE) { Stop-Install "setup failed (exit $LASTEXITCODE)" "run: `"$dir\rgd-git.exe`" doctor — it prints the broken link and the fix" }
+        $upd = "`"$dir\rgd-git.exe`" update"
     }
 } catch {
     Stop-Install "$($_.Exception.Message)" 're-run this script; if it persists, open an issue at https://github.com/CannibalToast/RGD-Git/issues'
 }
-Write-Host 'rgd-git installed — every repo on this machine is set up.'
+Write-Host "rgd-git installed — every repo on this machine is set up. Update later: $upd"

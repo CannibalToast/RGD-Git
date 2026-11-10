@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
+const { update } = require('./lib/updater');
 const { createDictionary, loadDictionaryText } = require('./lib/dictionary');
 const { parseRgd } = require('./lib/reader');
 const { buildRgd } = require('./lib/writer');
@@ -27,6 +28,8 @@ const fromText = text => {
 const parseAny = buf => parseRgd(isRgdBinary(buf) ? buf : fromText(utf8(buf)), dict);
 const stdin = () => fs.readFileSync(0);
 const out = data => process.stdout.write(data);
+
+const VERSION = require('./package.json').version;
 
 function isSea() {
     try { return require('node:sea').isSea(); } catch { return false; }
@@ -380,6 +383,11 @@ const COMMANDS = {
         console.log(`installed ${target}`);
         execFileSync(target, ['setup', '--global'], { stdio: 'inherit' });
     },
+
+    version() { out(VERSION + '\n'); },
+
+    // Replace this install with the latest release (lib/updater.js).
+    update,
 };
 
 const USAGE = `rgd-git — store .rgd files in git as text
@@ -387,22 +395,24 @@ const USAGE = `rgd-git — store .rgd files in git as text
   rgd-git setup [--global]   enable for this repo (or every repo on this machine)
   rgd-git doctor             audit the filter chain; exit 1 if anything is missing
   rgd-git install            standalone executable: install + enable for every repo
+  rgd-git update [--force]   replace this install with the latest release
+  rgd-git version            print the version
 
 Commands git runs itself: clean, smudge, textconv <file>, diff <7 git args>
 Repos opt in with this .gitattributes line:  *.rgd -text filter=rgd diff=rgd
 `;
 
-function main() {
+async function main() {
     const [cmd, ...args] = process.argv.slice(2);
     // Double-clicking the standalone executable (no arguments) installs it.
-    const name = cmd || (isSea() ? 'install' : null);
+    const name = (cmd === '--version' || cmd === '-v') ? 'version' : cmd || (isSea() ? 'install' : null);
     if (!COMMANDS[name]) {
         out(USAGE);
         process.exitCode = name ? 1 : 0;
         return;
     }
     try {
-        COMMANDS[name](args);
+        await COMMANDS[name](args);
     } catch (e) {
         // Translate the cryptic into the actionable for users who just clicked a file.
         let msg = e.message;
