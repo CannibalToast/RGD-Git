@@ -5,10 +5,15 @@
 #   curl -fsSL https://raw.githubusercontent.com/CannibalToast/RGD-Git/main/install.sh | sh
 set -e
 repo=https://github.com/CannibalToast/RGD-Git
-command -v git >/dev/null || {
-	echo "rgd-git needs git: https://git-scm.com" >&2
+
+die() {
+	echo >&2 "rgd-git install failed: $1"
+	[ -n "$2" ] && echo >&2 "  → $2"
 	exit 1
 }
+trap 'die "unexpected error (line $LINENO)" "re-run this script; if it persists, open an issue at $repo/issues"' ERR
+
+command -v git >/dev/null || die "git is not installed or not on PATH" "install Git from https://git-scm.com then re-run"
 
 # spin <pid> <label>: heartbeat while a background job runs (tty only —
 # piped installs keep quiet). wait $pid surfaces the job's exit code.
@@ -33,24 +38,24 @@ if command -v node >/dev/null; then
 	echo "installing rgd-git into $dir"
 	{ curl -fsSL "$repo/archive/refs/heads/main.tar.gz" | tar -xz -C "$dir" --strip-components=1; } &
 	spin $! 'downloading + extracting'
-	wait $!
-	node "$dir/rgd-git.js" setup --global
+	wait $! || die "download or extract failed" "check your network, then re-run"
+	node "$dir/rgd-git.js" setup --global ||
+		die "setup failed" "run: node '$dir/rgd-git.js' doctor — it prints the broken link and the fix"
 else
 	case "$(uname -s)-$(uname -m)" in
 	Linux-x86_64) asset=rgd-git-linux-x64 ;;
 	Darwin-arm64) asset=rgd-git-macos-arm64 ;;
-	*)
-		echo "No Node.js and no prebuilt rgd-git for $(uname -sm): install Node.js and re-run." >&2
-		exit 1
-		;;
+	*) die "no Node.js and no prebuilt rgd-git for $(uname -sm)" "install Node.js (https://nodejs.org) then re-run" ;;
 	esac
 	bin=$HOME/.local/bin/rgd-git
 	mkdir -p "$(dirname "$bin")"
 	echo "Node.js not found; downloading the standalone rgd-git executable..."
 	curl -fsSL -o "$bin" "$repo/releases/latest/download/$asset" &
 	spin $! 'downloading rgd-git (~100 MB)'
-	wait $!
+	wait $! || die "download failed" "check your network, then re-run"
+	[ -s "$bin" ] || die "download produced an empty file" "re-run; if it persists the release asset may be missing ($asset)"
 	chmod +x "$bin"
-	"$bin" setup --global
+	"$bin" setup --global ||
+		die "setup failed" "run: '$bin' doctor — it prints the broken link and the fix"
 fi
 echo "rgd-git installed — every repo on this machine is set up."

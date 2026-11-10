@@ -239,14 +239,22 @@ const COMMANDS = {
             'diff.rgd.cachetextconv': 'true',
         };
         const git = (a, input) => execFileSync('git', root ? ['-C', root, ...a] : a, { encoding: 'utf8', input, maxBuffer: Infinity });
-        for (const [key, value] of Object.entries(config)) git(['config', scope, key, value]);
+        try {
+            for (const [key, value] of Object.entries(config)) git(['config', scope, key, value]);
+        } catch (e) {
+            throw new Error(`could not write git config (${scope}) — is git working? run 'git status' to check\n  ${e.message}`);
+        }
         console.log(`rgd-git enabled (${scope === '--global' ? 'every repo on this machine' : root})`);
         if (!root) return;
 
         const attrs = path.join(root, '.gitattributes');
         const ATTR_LINE = '*.rgd -text filter=rgd diff=rgd';
         if (!/^\*\.rgd\b.*filter=rgd/m.test(fs.existsSync(attrs) ? fs.readFileSync(attrs, 'utf8') : '')) {
-            fs.appendFileSync(attrs, (fs.existsSync(attrs) && fs.readFileSync(attrs, 'utf8').trim() ? '\n' : '') + ATTR_LINE + '\n');
+            try {
+                fs.appendFileSync(attrs, (fs.existsSync(attrs) && fs.readFileSync(attrs, 'utf8').trim() ? '\n' : '') + ATTR_LINE + '\n');
+            } catch (e) {
+                throw new Error(`could not write .gitattributes — check permissions on ${root}\n  fix: add '${ATTR_LINE}' to it yourself`);
+            }
             console.log(`wrote '${ATTR_LINE}' to .gitattributes`);
         }
         this.verify(root);
@@ -386,7 +394,10 @@ function main() {
     try {
         COMMANDS[name](args);
     } catch (e) {
-        console.error(`rgd-git ${name}: ${e.message}`);
+        // Translate the cryptic into the actionable for users who just clicked a file.
+        let msg = e.message;
+        if (/spawn git ENOENT/.test(msg)) msg = 'git is not installed or not on PATH — install from https://git-scm.com';
+        console.error(`rgd-git ${name}: ${msg}`);
         process.exitCode = 1;
     }
     // Keep a double-clicked console window open long enough to read the result.
