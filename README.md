@@ -60,8 +60,10 @@ land after a verified download, so a failed update never breaks the working
 install. `rgd-git version` prints what you have.
 
 If rgd-git runs from a repo checkout instead of an install, `update` just tells
-you to `git pull`. Installations from before v0.1.3 don't have this command —
-re-run the install script once to get it.
+you to `git pull`.
+
+**Note:** `rgd-git update` exists in v0.1.3 and later. Older installs can't
+self-update — re-run the install script once, then `update` works from then on.
 
 You can also download an executable from the release yourself and
 double-click it. It is unsigned, so Windows SmartScreen may ask you to
