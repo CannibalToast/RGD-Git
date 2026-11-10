@@ -107,4 +107,37 @@ try {
     fs.rmSync(repo2, { recursive: true, force: true });
 }
 
-console.log('rgd-git tests passed');
+// Long-running filter process: one process serves every file over pkt-line v2
+const { spawn } = require('child_process');
+async function filterProcessTest() {
+    const pkt = b => Buffer.concat([Buffer.from((b.length + 4).toString(16).padStart(4, '0')), b]);
+    const FLUSH = Buffer.from('0000');
+    const child = spawn(EXE || 'node', EXE ? ['filter-process'] : [CLI, 'filter-process'], { stdio: ['pipe', 'pipe', 'inherit'] });
+    let buf = Buffer.alloc(0); const waiters = [];
+    const pump = () => { while (waiters.length && buf.length >= waiters[0].n) { const w = waiters.shift(); w.res(buf.subarray(0, w.n)); buf = buf.subarray(w.n); } };
+    child.stdout.on('data', d => { buf = Buffer.concat([buf, d]); pump(); });
+    const read = n => new Promise(res => { waiters.push({ n, res }); pump(); });
+    const packet = async () => { const h = await read(4); const len = parseInt(h.toString('latin1'), 16); return len === 0 ? null : read(len - 4); };
+    const list = async () => { const o = []; for (; ;) { const p = await packet(); if (p === null) return o; o.push(p); } };
+    const lines = async () => (await list()).map(p => p.toString('utf8').replace(/\n$/, ''));
+    const send = (...chunks) => { for (const c of chunks) child.stdin.write(c === FLUSH ? c : pkt(c)); };
+    const request = async (command, content) => {
+        send(Buffer.from(`command=${command}\n`), Buffer.from('pathname=x\n'), FLUSH, content, FLUSH);
+        const status = (await lines()).join(' ');
+        const data = status.includes('status=success') ? Buffer.concat(await list()) : null;
+        const status2 = data ? (await lines()).join(' ') : ''; // git sends a second status after data
+        return { status: `${status}|${status2}`, data };
+    };
+    send(Buffer.from('git-filter-client\n'), Buffer.from('version=2\n'), FLUSH);
+    assert.deepStrictEqual(await lines(), ['git-filter-server', 'version=2'], 'filter-process hello');
+    send(Buffer.from('capability=clean\n'), Buffer.from('capability=smudge\n'), FLUSH);
+    assert.deepStrictEqual(await lines(), ['capability=clean', 'capability=smudge'], 'filter-process capabilities');
+    assert.ok((await request('clean', bin)).data.equals(clean(bin)), 'filter-process clean matches clean');
+    assert.ok((await request('smudge', text)).data.equals(smudge(text)), 'filter-process smudge matches smudge');
+    assert.ok((await request('clean', conflicted)).status.includes('status=error'), 'filter-process reports per-file error');
+    child.stdin.end();
+    await new Promise(res => child.on('exit', res));
+}
+filterProcessTest()
+    .then(() => console.log('rgd-git tests passed'))
+    .catch(e => { console.error(e); process.exit(1); });

@@ -78,33 +78,135 @@ function tableDiff(baseRgd, curRgd) {
 
 // ── Commands ─────────────────────────────────────────────────────────────
 
-const COMMANDS = {
-    // git add: binary -> text. Stores the binary unchanged when the text can't rebuild its
-    // exact bytes (e.g. a negative NaN) or it doesn't parse, so checkout never alters a file.
-    clean() {
-        const buf = stdin();
-        if (isRgdBinary(buf)) {
-            try {
-                const text = toText(buf);
-                if (fromText(text).equals(buf)) return out(text);
-            } catch { /* fall through: store as-is */ }
-            return out(buf);
-        }
-        // Text here is a hand-resolved merge being added: refuse leftover markers, else canonicalize.
-        const text = utf8(buf);
-        if (CONFLICT.test(text)) throw new Error('unresolved merge conflict markers');
-        if (!text.startsWith(TEXT_HEADER)) return out(buf); // not an RGD at all
-        out(toText(fromText(text)));
-    },
+// git add: binary -> text. Stores the binary unchanged when the text can't rebuild its
+// exact bytes (e.g. a negative NaN) or it doesn't parse, so checkout never alters a file.
+function cleanBuffer(buf) {
+    if (isRgdBinary(buf)) {
+        try {
+            const text = toText(buf);
+            if (fromText(text).equals(buf)) return text;
+        } catch { /* fall through: store as-is */ }
+        return buf;
+    }
+    // Text here is a hand-resolved merge being added: refuse leftover markers, else canonicalize.
+    const text = utf8(buf);
+    if (CONFLICT.test(text)) throw new Error('unresolved merge conflict markers');
+    if (!text.startsWith(TEXT_HEADER)) return buf; // not an RGD at all
+    return toText(fromText(text));
+}
 
-    // git checkout: text -> binary. Binary blobs (pre-filter history, lossy files) and merge
-    // conflicts pass through untouched, so the user can resolve conflicts in the text.
-    smudge() {
-        const buf = stdin();
-        const text = utf8(buf);
-        if (isRgdBinary(buf) || !text.startsWith(TEXT_HEADER) || CONFLICT.test(text)) return out(buf);
-        out(fromText(text));
-    },
+// git checkout: text -> binary. Binary blobs (pre-filter history, lossy files) and merge
+// conflicts pass through untouched, so the user can resolve conflicts in the text.
+function smudgeBuffer(buf) {
+    const text = utf8(buf);
+    if (isRgdBinary(buf) || !text.startsWith(TEXT_HEADER) || CONFLICT.test(text)) return buf;
+    return fromText(text);
+}
+
+// ── Long-running filter process (git filter.<drv>.process, protocol v2) ──
+// One node process serves every file via pkt-line frames on stdin/stdout, instead
+// of forking per file. ~50x faster on bulk ops (status/checkout over many .rgd).
+
+const PKT_FLUSH = 'FLUSH', PKT_EOF = 'EOF';
+const MAX_PKT_DATA = 65516;
+
+function readAll(buf) {
+    let off = 0;
+    while (off < buf.length) {
+        let n;
+        try { n = fs.readSync(0, buf, off, buf.length - off, null); }
+        catch (e) { if (e.code === 'EAGAIN') continue; throw e; }
+        if (n === 0) return false; // EOF
+        off += n;
+    }
+    return true;
+}
+
+function readPacket() {
+    const hdr = Buffer.allocUnsafe(4);
+    if (!readAll(hdr)) return PKT_EOF;
+    const len = parseInt(hdr.toString('latin1'), 16);
+    if (len === 0) return PKT_FLUSH;
+    if (!(len >= 4) || len > 0xffff) throw new Error(`bad pkt-line header ${hdr.toString('latin1')}`);
+    const body = Buffer.allocUnsafe(len - 4);
+    if (!readAll(body)) throw new Error('EOF mid-packet');
+    return body;
+}
+
+function readPacketList() { // text packets until flush; null on clean EOF
+    const lines = [];
+    for (; ;) {
+        const p = readPacket();
+        if (p === PKT_EOF) return lines.length ? lines : null;
+        if (p === PKT_FLUSH) return lines;
+        lines.push(p.toString('utf8').replace(/\n$/, ''));
+    }
+}
+
+function readPacketData() { // binary packets until flush
+    const parts = [];
+    for (; ;) {
+        const p = readPacket();
+        if (p === PKT_EOF) throw new Error('EOF mid-file content');
+        if (p === PKT_FLUSH) return parts.length === 1 ? parts[0] : Buffer.concat(parts);
+        parts.push(p);
+    }
+}
+
+function writeAll(buf) {
+    let off = 0;
+    while (off < buf.length) {
+        try { off += fs.writeSync(1, buf, off, buf.length - off); }
+        catch (e) { if (e.code === 'EAGAIN') continue; throw e; }
+    }
+}
+
+function sendPacket(data) {
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf8');
+    writeAll(Buffer.from((buf.length + 4).toString(16).padStart(4, '0'), 'latin1'));
+    writeAll(buf);
+}
+
+function sendFlush() { writeAll(Buffer.from('0000', 'latin1')); }
+
+function sendData(buf) {
+    for (let i = 0; i < buf.length; i += MAX_PKT_DATA) sendPacket(buf.subarray(i, Math.min(i + MAX_PKT_DATA, buf.length)));
+}
+
+function filterProcess() {
+    {
+        const hello = readPacketList();
+        if (!hello || hello[0] !== 'git-filter-client' || !hello.includes('version=2')) {
+            throw new Error(`bad filter-process handshake: ${hello && hello.join(' ')}`);
+        }
+        sendPacket('git-filter-server\n'); sendPacket('version=2\n'); sendFlush();
+        readPacketList(); // git's capabilities
+        sendPacket('capability=clean\n'); sendPacket('capability=smudge\n'); sendFlush();
+
+        for (; ;) {
+            const request = readPacketList();
+            if (request === null) return; // git closed stdin — clean shutdown
+            const command = request.find(l => l.startsWith('command='))?.slice(8);
+            const content = readPacketData();
+            let result, status = 'success';
+            try {
+                if (command === 'clean') result = cleanBuffer(content);
+                else if (command === 'smudge') result = smudgeBuffer(content);
+                else status = 'error';
+            } catch { status = 'error'; } // git falls back to the clean/smudge commands
+            sendPacket(`status=${status}\n`); sendFlush();
+            if (status === 'success') {
+                sendData(Buffer.isBuffer(result) ? result : Buffer.from(result, 'utf8')); sendFlush();
+                sendPacket('status=success\n'); sendFlush(); // git reads a second status after the data
+            }
+        }
+    }
+}
+
+const COMMANDS = {
+    clean() { out(cleanBuffer(stdin())); },
+    smudge() { out(smudgeBuffer(stdin())); },
+    'filter-process': filterProcess,
 
     // diff.rgd.textconv: shows binary blobs from pre-filter history as text too.
     textconv([file]) {
@@ -131,6 +233,7 @@ const COMMANDS = {
         const config = {
             'filter.rgd.clean': `${cmd} clean`,
             'filter.rgd.smudge': `${cmd} smudge`,
+            'filter.rgd.process': `${cmd} filter-process`,
             'filter.rgd.required': 'true',
             'diff.rgd.textconv': `${cmd} textconv`,
             'diff.rgd.cachetextconv': 'true',
