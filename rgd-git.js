@@ -244,9 +244,12 @@ const COMMANDS = {
         if (!root) return;
 
         const attrs = path.join(root, '.gitattributes');
+        const ATTR_LINE = '*.rgd -text filter=rgd diff=rgd';
         if (!/^\*\.rgd\b.*filter=rgd/m.test(fs.existsSync(attrs) ? fs.readFileSync(attrs, 'utf8') : '')) {
-            console.error(`warning: add '*.rgd -text filter=rgd diff=rgd' to ${attrs} — the filter stays inactive until you do`);
+            fs.appendFileSync(attrs, (fs.existsSync(attrs) && fs.readFileSync(attrs, 'utf8').trim() ? '\n' : '') + ATTR_LINE + '\n');
+            console.log(`wrote '${ATTR_LINE}' to .gitattributes`);
         }
+        this.verify(root);
 
         // Clean stale checkouts go back through git; files with local edits convert in
         // place so the edit survives (and keeps showing as modified until committed).
@@ -294,6 +297,17 @@ const COMMANDS = {
         console.log(`restored ${restored} .rgd file(s) from text to binary`);
         if (edited.length) console.log(`${edited.length} file(s) had local edits and stay modified until committed`);
         for (const f of failed) console.error(`  failed: ${f}`);
+    },
+
+    // End of setup: prove the filter actually works through git — filtered hash must
+    // differ from raw hash on a real tracked file. Printed last so it can't be missed.
+    verify(root) {
+        const git = (a, input) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', input, maxBuffer: Infinity }).trim();
+        const f = git(['ls-files', '--', '*.rgd']).split('\n').filter(Boolean)[0];
+        if (!f) { console.log('no tracked .rgd files — nothing to verify'); return true; }
+        const ok = git(['hash-object', '--path=' + f, f]) !== git(['hash-object', '--stdin'], fs.readFileSync(path.join(root, f)));
+        console.log(ok ? 'filter verified working' : `WARNING: filter configured but inactive — run 'rgd-git doctor'`);
+        return ok;
     },
 
     // Audit the whole chain: config, .gitattributes, and a live hash-object round-trip
