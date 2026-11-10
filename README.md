@@ -56,14 +56,16 @@ as text before rgd-git was installed.
 
 ## Enable a repo (once per repo)
 
-Add this line to the repo's `.gitattributes`, then convert the existing files
-in one commit:
+`rgd-git setup` writes the needed `*.rgd` line to `.gitattributes` itself and
+ends by verifying the filter actually works. To convert files already tracked,
+commit one renormalize:
 
 ```sh
-echo '*.rgd -text filter=rgd diff=rgd' >> .gitattributes
 git add --renormalize .
 git commit -m "Store .rgd files as text via rgd-git"
 ```
+
+`rgd-git doctor` audits the whole chain later if anything seems off.
 
 Commits from before this one stay binary in history. `git log -p` still shows
 them as text through the textconv driver that setup installs.
