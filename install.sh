@@ -11,7 +11,10 @@ die() {
 	[ -n "$2" ] && echo >&2 "  → $2"
 	exit 1
 }
-trap 'die "unexpected error (line $LINENO)" "re-run this script; if it persists, open an issue at $repo/issues"' ERR
+# ERR traps are bash-only — skip under dash (curl|sh on Ubuntu), where the
+# per-command `|| die` guards below still cover every expected failure.
+[ -n "${BASH_VERSION:-}" ] &&
+	trap 'die "unexpected error (line $LINENO)" "re-run this script; if it persists, open an issue at $repo/issues"' ERR
 
 command -v git >/dev/null || die "git is not installed or not on PATH" "install Git from https://git-scm.com then re-run"
 
