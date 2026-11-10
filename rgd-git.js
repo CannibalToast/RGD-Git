@@ -296,6 +296,38 @@ const COMMANDS = {
         for (const f of failed) console.error(`  failed: ${f}`);
     },
 
+    // Audit the whole chain: config, .gitattributes, and a live hash-object round-trip
+    // through git's own filter machinery. exit 1 if anything needed is missing.
+    doctor() {
+        const cfg = k => { try { return execFileSync('git', ['config', '--get', k], { encoding: 'utf8' }).trim(); } catch { return null; } };
+        const git = (a, input) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', input, maxBuffer: Infinity }).trim();
+        const root = gitRoot();
+        let bad = 0;
+        const check = (ok, label, fix) => { console.log(`${ok ? 'ok' : 'MISSING'}  ${label}`); if (!ok) { bad++; if (fix) console.log(`   fix: ${fix}`); } };
+        for (const k of ['clean', 'smudge', 'process', 'required'])
+            check(cfg(`filter.rgd.${k}`) !== null, `filter.rgd.${k}`, 'run: rgd-git setup' + (root ? '' : ' --global'));
+        check(cfg('diff.rgd.textconv') !== null, 'diff.rgd.textconv', 'run: rgd-git setup' + (root ? '' : ' --global'));
+        if (!root) {
+            console.log('not inside a repo — config checks done, skipping repo checks');
+        } else {
+            check(!fs.existsSync(path.join(root, '.git', 'index.lock')), 'no stale .git/index.lock',
+                'remove it once no git process is running');
+            const f = git(['ls-files', '--', '*.rgd']).split('\n').filter(Boolean)[0];
+            if (!f) console.log('info   no tracked .rgd files in this repo — filter inactive by definition');
+            else {
+                const attrs = path.join(root, '.gitattributes');
+                check(/^\*\.rgd\b.*filter=rgd/m.test(fs.existsSync(attrs) ? fs.readFileSync(attrs, 'utf8') : ''),
+                    '.gitattributes: *.rgd filter=rgd', `echo '*.rgd -text filter=rgd diff=rgd' >> .gitattributes`);
+                const filtered = git(['hash-object', '--path=' + f, f]);
+                const raw = git(['hash-object', '--stdin'], fs.readFileSync(path.join(root, f)));
+                check(filtered !== raw, `clean filter active (git hash-object --path ${f})`, 'run: rgd-git setup');
+            }
+            if (cfg('core.untrackedcache') === null) console.log('info   core.untrackedCache off — speeds up status on huge trees');
+            if (cfg('core.fsmonitor') === null) console.log('info   core.fsmonitor off — speeds up status on huge trees');
+        }
+        process.exitCode = bad ? 1 : 0;
+    },
+
     // Standalone executable: copy to a stable per-user location, then set up git globally.
     install() {
         if (!isSea()) throw new Error('install is for the standalone executable; with Node, run: setup --global');
@@ -314,6 +346,7 @@ const COMMANDS = {
 const USAGE = `rgd-git — store .rgd files in git as text
 
   rgd-git setup [--global]   enable for this repo (or every repo on this machine)
+  rgd-git doctor             audit the filter chain; exit 1 if anything is missing
   rgd-git install            standalone executable: install + enable for every repo
 
 Commands git runs itself: clean, smudge, textconv <file>, diff <7 git args>
